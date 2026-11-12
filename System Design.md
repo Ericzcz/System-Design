@@ -543,3 +543,114 @@ Idempotency很重要！
    JSON格式
 
 ### GraphQL
+
+什么时候用：
+
+1. 当面对那些具有不同数据需求的多样化客户端时
+2. 避免过度查询或查询不足的问题
+3. 当需要在不进行后端更改的情况下快速进行迭代时
+
+缺点：
+
+1. GraphQL 增加了系统的复杂性。需要实现查询解析、模式验证，复杂的缓存策略
+
+2. 要自己设计批处理去解决“N+1”问题
+3. REST 通常在接口层进行权限控制；GraphQL 可以在类型、字段和 resolver 层实施更细粒度的权限控制，但必须由服务端显式实现
+
+### RPC
+
+RPC 是以动作为导向的
+
+```typescript
+// Instead of GET /events/123
+getEvent(eventId: "123")
+
+// Instead of POST /events/123/bookings
+createBooking(eventId: "123", userId: "456", tickets: [...])
+
+// Instead of GET /events/123/tickets
+getAvailableTickets(eventId: "123", section: "VIP")
+```
+
+例子：
+
+1. gRPC
+2. Apache Thrift
+
+
+
+gRPC使用 Protocol Buffers 来定义服务接口，需要编写一个`.proto`文件，描述服务的方法和数据结构。
+
+gRPC 能够生成多种编程语言的客户端和服务器，在编译阶段就实现类型安全的交互，从而在部署之前避免类型不匹配的问题。
+
+
+
+什么时候用：
+
+1. 性能至关重要
+2. 类型安全性非常重要
+3. 服务对服务的通信
+4. 需要流氏传输功能
+
+## API设计原则
+
+1. 设计应围绕资源，而不是操作：使用 GET 请求访问“/users/{id}/bookings”，使用 POST 请求访问“/payments”
+2. 在所有地方保持一致性：不要一个端点用?state=paid，另一个端点用?status=paid
+3. 遵循“最小化意外情况”的原则：按照其他人的方式使用 HTTP 协议。GET 方法从不修改数据，DELETE 方法用于删除数据，而 200 状态码表示成功
+4. 保持API的无状态特征：每个请求都应该包含服务器处理它所需的所有信息：认证令牌、参数以及数据内容
+5. 确保充实操作安全：重试时要注意幂等性，GET/PUT/DELETE是幂等的，POST不保证幂等性所以要设计成幂等操作
+6. 对于任何可以扩展的数据，都需要进行分页处理
+7. 默认情况下，保护每个终端节点：除非明确标记为公开，否则访问都必须提供有效令牌。授权用于确认调用者确实有权限操作该特定资源。速率限制可以进一步保障这一机制的有效性
+
+​	（身份验证和授权不同。身份验证是验证令牌，看签名是否正确，是否过期，是否由可信的认证服务签发；授权是进行权限判定，比	如令牌中的UserId是否等于预定的OwnerID）
+
+8. 在不会破坏客户端依赖的情况下进行更新：添加新的字段是安全的，但修改现有字段的名称、删除某个字段或改变其功能则属于破坏性变更，因此需要专门的版本管理机制来处理
+
+   ![image-20261111125824817](../../Library/Application Support/typora-user-images/image-20261111125824817.png)
+
+9. 让错误可以被处理：使用正确的状态码。返回一个机器可读的错误代码以及一份人类可读的错误信息。
+
+   ```java
+   {
+     "error": {
+       "code": "SEAT_UNAVAILABLE",
+       "message": "VIP 区只剩 1 个座位"
+     }
+   }
+   
+   if error["code"] == "SEAT_UNAVAILABLE":
+       print(error["message"])
+   ```
+
+   
+
+## API Patterns
+
+### 分页 Pagination
+
+#### 基于偏移值的分页 Offset-based
+
+跳过多少条记录`/events?offset=20&limit=10`，获取21-30条
+
+不足：
+
+1. 对于大型数据集会很慢
+2. 如果有人添加了新事件，会出现重复或遗漏
+
+#### 基于游标的分页 Cursor-based
+
+第一个请求：`/events?limit=10`
+
+后续请求：`/events?cursor=cmd9atj3p000007ky19w1dpy2&limit=10`
+
+Response里会有next_cursor
+
+好处：
+
+​	1.不受新纪录添加的影响
+
+​	2.适合高容量场景
+
+不足：
+
+​	1.要实现“跳转到第 5 页”这样的功能比较困难
